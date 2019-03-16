@@ -14,7 +14,7 @@ def fetchData():
 	def getStationDetails():
 	    df = pd.read_csv('data/stationNames.csv', thousands=',')
 	    return(df[['ID', 'Longitude', 'Latitude', 'ElevationFeet']])
-
+    
 	bucket = 'cadc-snowbot'
 	s3_client = boto3.client('s3')
 	s3_resource = boto3.resource('s3')
@@ -62,8 +62,11 @@ def fetchData():
 	        
 	    if((start_date == first_date) & (end_date == yesterday)):
 	        backupData(df, df_raw, sens)
+            
+	    #df.to_csv("station_data.csv")
+	    #df_raw.to_csv("station_data_raw.csv")
 	    
-	    return(df, df_raw)
+	    return df, df_raw
 	    
 	def backupData(df, df_raw, sens):
 	    fname = "{}_0{}".format(today.replace('-',''),sens)
@@ -73,7 +76,7 @@ def fetchData():
 	    df.to_csv("data/{}".format(fnameBackup))
 	    df_raw.to_csv("data/{}".format(fnameRaw))
         
-	    s3_resource.Object(bucket,fnameBackup).upload_file(Filenme='data/{}'.format(fnameBackup))
+	    s3_resource.Object(bucket,fnameBackup).upload_file(Filename='data/{}'.format(fnameBackup))
 	    
 	    s3_resource.Object(bucket,fnameRaw).upload_file(Filename='data/{}'.format(fnameRaw))
 	    
@@ -92,8 +95,6 @@ def fetchData():
 	        obj = s3_client.get_object(Bucket=bucket, Key=file)#.download_file(Filename=f'data/{file}')
 	        return(pd.read_csv(io.BytesIO(obj['Body'].read())))
 	    
-
-
 	def getUrl(st, sens, start, end):
 	    return('http://cdec.water.ca.gov/dynamicapp/req/CSVDataServlet?Stations={}&SensorNums={}&dur_code=D&Start={}&End={}'.format(st,sens,today,today))
 
@@ -103,7 +104,7 @@ def fetchData():
 
 	def dailyUpdate(sens=3):
 	    try:
-	        updateHistorical(sens)     # daily snow water content
+	        updateHistorical(sens) 
 	    except:
 	        try:
 	            getLastFile('0{}'.format(sens), 'backup')
@@ -111,7 +112,10 @@ def fetchData():
 	            getLastFile('0{}'.format(sens), 'raw')
 	            filename=max(os.listdir('data/raw*'))
 	            processRaw(filename)
-
+                
+	data1, data2 = dailyUpdate(sens=3)
+	data1.to_csv("station_level_data.csv")   
+	data2.to_csv("station_level_data_raw.csv")                
 
 def krigingscript():
 
@@ -125,36 +129,34 @@ def krigingscript():
 	import pandas as pd
 
 	def kriging_per_row(all_data_daily_slice):
-        
-        param_dict3d = {"method": ["ordinary3d", "universal3d"],
-	                  "variogram_model": ["linear", "power", "gaussian", "spherical"]
-	                    }
-        estimator = GridSearchCV(Krige(), param_dict3d, verbose=False)
+    
+	    param_dict3d = {"method":["ordinary3d", "universal3d"],"variogram_model": ["linear", "power", "gaussian", "spherical"]}
+	                    
+	    estimator = GridSearchCV(Krige(), param_dict3d, verbose=False)
 	    interpolated_values = pd.DataFrame()
 	  
 	    for index,row_under_observation in all_data_daily_slice.iterrows(): 
-            row_under_observation = pd.DataFrame(row_under_observation)   
+	        row_under_observation = pd.DataFrame(row_under_observation)   
+	        transposed_row = row_under_observation.T
 	  
-            transposed_row = row_under_observation.T
-	  
-            #merge using station ids as indices
-            snow_amt_with_locn = all_data_daily_slice.merge(row_under_observation,left_index = True, right_index = True)
-            snow_amt_with_locn.rename(columns = {index : 'snow_adj_inches'} , inplace = True)
-            snow_amt_with_locn['snow_adj_mters'] = snow_amt_with_locn['snow_adj_inches'] * 0.0254
+	              #merge using station ids as indices
+	        snow_amt_with_locn = all_data_daily_slice.merge(row_under_observation,left_index = True, right_index = True)
+	        snow_amt_with_locn.rename(columns = {index : 'snow_adj_inches'} , inplace = True)
+	        snow_amt_with_locn['snow_adj_mters'] = snow_amt_with_locn['snow_adj_inches'] * 0.0254
 
 	  #containing non null values
-            snow_amt_with_locn_notnull = snow_amt_with_locn.dropna()
+	        snow_amt_with_locn_notnull = snow_amt_with_locn.dropna()
 	    #print(snow_amt_with_locn_notnull.shape)
 	  
 	  #containing null values 
-            snow_amount_null = snow_amt_with_locn[snow_amt_with_locn['snow_adj_inches'].isnull() == True]
-            snow_amount_null.drop(['snow_adj_mters'],axis=1 , inplace = True)
+	        snow_amount_null = snow_amt_with_locn[snow_amt_with_locn['snow_adj_inches'].isnull() == True]
+	        snow_amount_null.drop(['snow_adj_mters'],axis=1 , inplace = True)
 	  
 
 	  # perform grid search to identify the good fitting variogram
-            if (snow_amt_with_locn_notnull.shape[0] != 0 and snow_amt_with_locn_notnull.shape[0] != 1):
-                lons=numpy.array(snow_amt_with_locn_notnull['Longitude_Metres']) 
-                lons = lons[~numpy.isnan(lons)]
+	        if (snow_amt_with_locn_notnull.shape[0] != 0 and snow_amt_with_locn_notnull.shape[0] != 1):
+	            lons=numpy.array(snow_amt_with_locn_notnull['Longitude_Metres']) 
+	            lons = lons[~numpy.isnan(lons)]
 
 	            lats=numpy.array(snow_amt_with_locn_notnull['Latiitude_Metres']) 
 	            lats = lats[~numpy.isnan(lats)]
@@ -167,60 +169,64 @@ def krigingscript():
 	            zero_count_fraction = (zero_count / snow_amount.shape[0])
      
 
-            if numpy.all(snow_amount == 0.0) or zero_count_fraction >= 0.9:
-                predicted_Values = numpy.zeros(snow_amount_null.shape[0])
-                predicted_snow_values = pd.DataFrame(predicted_Values,index =snow_amount_null.index.values.tolist() , columns = ['snow_adj_mters'])
+	        if numpy.all(snow_amount == 0.0) or zero_count_fraction >= 0.9:
+	            predicted_Values = numpy.zeros(snow_amount_null.shape[0])
+	            predicted_snow_values = pd.DataFrame(predicted_Values,index =snow_amount_null.index.values.tolist() , columns = ['snow_adj_mters'])
 	        
 	  
 	        else:
-                lons_null=numpy.array(snow_amount_null['Longitude_Metres']) 
-                lats_null=numpy.array(snow_amount_null['Latiitude_Metres']) 
-                elev_null=numpy.array(snow_amount_null['ElevationRelative'])
-                X = numpy.array(snow_amt_with_locn_notnull[['Longitude_Metres','Latiitude_Metres', 'ElevationRelative']])
-                y = numpy.array(snow_amt_with_locn_notnull['snow_adj_mters'])
-                estimator = GridSearchCV(Krige(), param_dict3d, verbose=False)
+	            lons_null=numpy.array(snow_amount_null['Longitude_Metres']) 
+	            lats_null=numpy.array(snow_amount_null['Latiitude_Metres']) 
+	            elev_null=numpy.array(snow_amount_null['ElevationRelative'])
+	            X = numpy.array(snow_amt_with_locn_notnull[['Longitude_Metres','Latiitude_Metres', 'ElevationRelative']])
+	            y = numpy.array(snow_amt_with_locn_notnull['snow_adj_mters'])
+	            estimator = GridSearchCV(Krige(), param_dict3d, verbose=False)
 	        
 	        
 	        try:
-                estimator.fit(X=X, y=y, verbose=False)
+	            estimator.fit(X=X, y=y, verbose=False)
 	        # find the best kriging technique:
 	            if hasattr(estimator, 'best_score_'):
-                    print('best_score R²={}'.format(round(estimator.best_score_,2)))
-                    print('best_params = ', estimator.best_params_)
+	                print('best_score R²={}'.format(round(estimator.best_score_,2)))
+	                print('best_params = ', estimator.best_params_)
 	  
 	        
-                if(estimator.best_params_['method'] == 'universal3d' ):
-                    ok3d = UniversalKriging3D(lons, lats, elev, snow_amount, variogram_model=estimator.best_params_['variogram_model'])
-                    predicted_Values, variance_locn = ok3d.execute('points',  lons_null,lats_null,elev_null)
+	            if(estimator.best_params_['method'] == 'universal3d' ):
+	                ok3d = UniversalKriging3D(lons, lats, elev, snow_amount, variogram_model=estimator.best_params_['variogram_model'])
+	                predicted_Values, variance_locn = ok3d.execute('points',  lons_null,lats_null,elev_null)
 	          
-	          else:
-	            sim3d = OrdinaryKriging3D(lons, lats, elev, snow_amount, variogram_model=estimator.best_params_['variogram_model'])
-	            predicted_Values, variance_locn = sim3d.execute('points',  lons_null,lats_null,elev_null)
+	            else:
+	                sim3d = OrdinaryKriging3D(lons, lats, elev, snow_amount, variogram_model=estimator.best_params_['variogram_model'])
+	                predicted_Values, variance_locn = sim3d.execute('points',  lons_null,lats_null,elev_null)
 	          
 	          
 	        except ValueError:
-                sim3d = OrdinaryKriging3D(lons, lats, elev, snow_amount, variogram_model='gaussian')
-                predicted_Values, variance_locn = sim3d.execute('points',  lons_null,lats_null,elev_null)
+	            sim3d = OrdinaryKriging3D(lons, lats, elev, snow_amount, variogram_model='gaussian')
+	            predicted_Values, variance_locn = sim3d.execute('points',  lons_null,lats_null,elev_null)
 	          
 	            
-                predicted_snow_values = pd.DataFrame(predicted_Values,index =snow_amount_null.index.values.tolist() , columns = ['snow_adj_mters'])
+	            predicted_snow_values = pd.DataFrame(predicted_Values,index =snow_amount_null.index.values.tolist() , columns = ['snow_adj_mters'])
 	        
-                interplated_df = pd.merge(predicted_snow_values,snow_amount_null,left_index = True, right_index = True)
+	            interplated_df = pd.merge(predicted_snow_values,snow_amount_null,left_index = True, right_index = True)
 	        
 	            final_row = pd.concat([snow_amt_with_locn_notnull,interplated_df])
 	        
-                final_row_snow = final_row[['snow_adj_mters']]
-                final_row_snow_transpose = final_row_snow.T
-                final_row_snow_transpose = final_row_snow_transpose[stn_data.ID.values.tolist()]
-                interpolated_values = interpolated_values.append(final_row_snow_transpose)
+	            final_row_snow = final_row[['snow_adj_mters']]
+	            final_row_snow_transpose = final_row_snow.T
+	            final_row_snow_transpose = final_row_snow_transpose[stn_data.ID.values.tolist()]
+	            interpolated_values = interpolated_values.append(final_row_snow_transpose)
 
 	    else:
-            last_row = interpolated_values.tail(1)
+	        last_row = interpolated_values.tail(1)
 	        interpolated_values = interpolated_values.append(last_row)
 	    
 	    
-	    interpolated_values.to_csv('f12k.csv')
-	    return()
+	    
+	    return interpolated_values
+    
+	all_data_daily_slice = 'data/backup_20190316_03.csv'    
+	data = kriging_per_row(all_data_daily_slice)
+	data.to_csv("interpolated_data.csv")    
 
 
 def production_script():
@@ -232,8 +238,8 @@ def production_script():
 	import matplotlib.pyplot as plt
 
 	def read_swe():
-    '''function to read in and format the raw swe data (y data)'''
-    	url = 'https://s3-us-west-2.amazonaws.com/cawater-public/swe/pred_SWE.txt'
+	    '''function to read in and format the raw swe data (y data)'''
+	    url = 'https://s3-us-west-2.amazonaws.com/cawater-public/swe/pred_SWE.txt'
 	    swe_vol = pd.read_csv(url, header=None, names=['date', 'area', 'vol'])
 	    swe_vol['date'] = pd.to_datetime(swe_vol['date'])
 	    swe_vol.set_index('date', inplace=True)
@@ -243,15 +249,9 @@ def production_script():
 	    return swe_vol
 
 
-	def read_file(file_path, direct):
+	def read_file(file_path):
 	    '''Function to read in daily x data'''
-	    if os.path.exists(os.getcwd() + '/' + file_path) == True:
-	        station = pd.read_csv(file_path)
-	    else:
-	        zip_file = zipfile.Zipfile(file_path, 'r')
-	        zip_file.extractall(direct)
-	        station = pd.read_csv(file_path)
-
+	    station = pd.read_csv(file_path)
 	    station['date'] = pd.to_datetime(station['date'])
 	    station = station.sort_values(by='date')
 	    station.set_index('date', inplace=True)  # put date in the index
@@ -264,7 +264,7 @@ def production_script():
 
 	    return station
 
-    def merge_data(df1, df2):
+	def merge_data(df1, df2):
 	    """merge station and swe estimate data"""
 	    swe = pd.merge(left=df1, right=df2, left_index=True, right_index=True)
 	    swe.dropna(axis=1, how='all', inplace=True)
@@ -274,10 +274,10 @@ def production_script():
 
 	    x_array = x.values
 
-    	return swe, x, y, x_array
+	    return swe, x, y, x_array
 
 
-    def train_test_split(x, y):
+	def train_test_split(x, y):
 	    y.reset_index(inplace=True)
 	    y_filter = y.iloc[2:]
 	    xy_lag = pd.merge(left=y_filter, right=x, how='left', left_index=True, right_index=True)
@@ -304,7 +304,7 @@ def production_script():
 	    return y_train, x_train, y_test, x_test, y_predict, x_predict, train, test, predict
 
 
-    def model(xgb_model, x_train, x_test, x_predict, y_test, y_train):
+	def model(xgb_model, x_train, x_test, x_predict, y_test, y_train):
 	    xgb = pickle.load(open(xgb_model, "rb"))
 
 	    train_preds = xgb.predict(x_train)
@@ -357,12 +357,12 @@ def production_script():
 
 	    ax.text('1984-1-1', 37, "RMSE of the train set: {}".format(round(train_rmse, 4)))
 	    ax.text('1984-1-1', 35, "RMSE of the test set: {}".format(round(test_rmse, 4)))
-		
-		font = {'family' : 'normal',
+	
+	    font = {'family' : 'normal',
 	        'weight' : 'bold',
 	        'size'   : 14}
 
-		plt.rc('font', **font)
+	    plt.rc('font', **font)
 
 	    plt.savefig('SWE Time Series {}.png'.format(datetime.datetime.now().strftime("%Y-%m-%d")))
 
@@ -417,9 +417,9 @@ def production_script():
 	        'weight' : 'bold',
 	        'size'   : 10}
 
-		plt.rc('font', **font)
-		
-		plt.savefig("SWE Correlation Plots {}.png".format(datetime.datetime.now().strftime("%Y-%m-%d")))
+	    plt.rc('font', **font)
+	
+	    plt.savefig("SWE Correlation Plots {}.png".format(datetime.datetime.now().strftime("%Y-%m-%d")))
 
 	def vis3(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test):
 
@@ -488,79 +488,77 @@ def production_script():
 	    pred_series['water_day'] = [x - 273 if x >= 273 else x + 92 for x in pred_series['doy']]
 
 	    pred_series = pred_series[['water_day', 0]]
-		
-		#get day level standard deviation 
-		total_swe['water_day'] = [x-273 if x >= 273 else x+92 for x in total_swe['doy']]
+	
+	    #get day level standard deviation 
+	    total_swe['water_day'] = [x-273 if x >= 273 else x+92 for x in total_swe['doy']]
 
-		swe_agg = total_swe.groupby('water_day')['vol'].agg(['mean','std'])
-		
-		#get upper and lower standard deviation bounds
-		swe_agg['std_upper'] = swe_agg['mean'] + swe_agg['std']
-		swe_agg['std_lower'] =  swe_agg['mean'] - swe_agg['std']
-		
-		#resent index so I can use water day in the charting
-		swe_agg.reset_index(inplace=True)
-		
+	    swe_agg = total_swe.groupby('water_day')['vol'].agg(['mean','std'])
+	
+	    #get upper and lower standard deviation bounds
+	    swe_agg['std_upper'] = swe_agg['mean'] + swe_agg['std']
+	    swe_agg['std_lower'] =  swe_agg['mean'] - swe_agg['std']
+	
+	    #resent index so I can use water day in the charting
+	    swe_agg.reset_index(inplace=True)
+	
 
-		fig = plt.figure(figsize=(20,10))
-		ax = fig.add_subplot(111)
+	    fig = plt.figure(figsize=(20,10))
+	    ax = fig.add_subplot(111)
 
-		ax.plot(actuals_series['water_day'],actuals_series['vol_x'],color='c',label='1990-91 Water Year',linewidth=3)
-		ax.plot(actuals_series['water_day'],actuals_series['vol_y'],color='b',linestyle='--',alpha=0.5,label='1984-2016 Avg. Water Year',linewidth=3)
-		ax.plot(pred_series['water_day'],pred_series[0],color='g',label='2018-19 Water Year Forecast',linewidth=3)
+	    ax.plot(actuals_series['water_day'],actuals_series['vol_x'],color='c',label='1990-91 Water Year',linewidth=3)
+	    ax.plot(actuals_series['water_day'],actuals_series['vol_y'],color='b',linestyle='--',alpha=0.5,label='1984-2016 Avg. Water Year',linewidth=3)
+	    ax.plot(pred_series['water_day'],pred_series[0],color='g',label='2018-19 Water Year Forecast',linewidth=3)
 
-		ax.set_xlabel("Day of the Water Year")
-		ax.set_ylabel("Sierra Nevada Total Storage [km3]")
-		ax.set_title("SWE Daily Estimate Comparison")
-		ax.set_ylim(0.15,30)
-		ax.set_xlim(0,365)
+	    ax.set_xlabel("Day of the Water Year")
+	    ax.set_ylabel("Sierra Nevada Total Storage [km3]")
+	    ax.set_title("SWE Daily Estimate Comparison")
+	    ax.set_ylim(0.15,30)
+	    ax.set_xlim(0,365)
 
-		plt.fill_between(swe_agg['water_day'],swe_agg['std_lower'], swe_agg['std_upper'], facecolor='lightgray',label='1984-2016 +/- 1 std.')
+	    plt.fill_between(swe_agg['water_day'],swe_agg['std_lower'], swe_agg['std_upper'], facecolor='lightgray',label='1984-2016 +/- 1 std.')
 
 
-		plt.legend()
+	    plt.legend()
 
-		ax.annotate("Updated as of: {}".format(datetime.datetime.now().strftime("%Y-%m-%d")),xy=(1, 28), xytext=(1.5, 28))
-		ax.annotate("Today's Forecast: {} [km3]".format(pred_series[0].iloc[-1:].values),xy=(1, 28), xytext=(1.5, 26))
+	    ax.annotate("Updated as of: {}".format(datetime.datetime.now().strftime("%Y-%m-%d")),xy=(1, 28), xytext=(1.5, 28))
+	    ax.annotate("Today's Forecast: {} [km3]".format(pred_series[0].iloc[-1:].values),xy=(1, 28), xytext=(1.5, 26))
 
-		font = {'family' : 'normal',
-				'weight' : 'bold',
-				'size'   : 16}
+	    font = {'family':'normal','weight':'bold','size': 16}
 
-		plt.text(0.05,-5,"Comment: Today's forecast is {}% of the historical average".format((pred_series[0].iloc[-1:].values / actuals_series['vol_y'][len(pred_series) -1]) * 100))
-		plt.rc('font', **font)
+	    plt.text(0.05,-5,"Comment: Today's forecast is {}% of the historical average".format((pred_series[0].iloc[-1:].values / actuals_series['vol_y'][len(pred_series) -1]) * 100))
+	    plt.rc('font', **font)
 
-		plt.savefig("Daily Water Year Graph_{}.png".format(datetime.datetime.now().strftime("%Y-%m-%d")))
+	    plt.savefig("Daily Water Year Graph_{}.png".format(datetime.datetime.now().strftime("%Y-%m-%d")))
 
 	file = 'fulldataset.csv'
 	xgb_pickle = "swe_xgb.pickle.dat"  
 
 	swe_vol = read_swe(url_path)
-    station = read_file(file)
-    swe, x, y, x_array = merge_data(swe_vol, station)
-    x_lag = create_lags(x_array, n_in=2, n_out=1)
-    train, test, predict, y_train, x_train, y_test, x_test, y_predict, x_predict = train_test_split(x_lag, y)
-    train_preds, test_preds, predict_preds, test_rmse, train_rmse = model(xgb_pickle, x_train, x_test,
+	station = read_file(file)
+	swe, x, y, x_array = merge_data(swe_vol, station)
+	x_lag = create_lags(x_array, n_in=2, n_out=1)
+	train, test, predict, y_train, x_train, y_test, x_test, y_predict, x_predict = train_test_split(x_lag, y)
+	train_preds, test_preds, predict_preds, test_rmse, train_rmse = model(xgb_pickle, x_train, x_test,
                                                                           x_predict, y_test, y_train)
 
-    vis1(train, train_preds, test, test_preds, predict, predict_preds, y_train, y_test, train_rmse, test_rmse)
-    vis2(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test)
-    vis3(y_train, y_test, pred_graph)
+	#vis1(train, train_preds, test, test_preds, predict, predict_preds, y_train, y_test, train_rmse, test_rmse)
+	vis2(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test)
+	vis3(y_train, y_test, pred_graph)
 
     
 def twitter_post(cons_key,cons_secret,access_token,at_secret):
-    auth = tweepy.OAuthHandler(cons_key,cons_secret)
-    auth.set_access_token(access_token,at_secret)
-    api = tweepy.API(auth)
-    list_of_files = glob.glob('path/*.png')
-    latest_file = max(list_of_files, key=os.path.getctime)
-    print(latest_file)
+	auth = tweepy.OAuthHandler(cons_key,cons_secret)
+	auth.set_access_token(access_token,at_secret)
+	api = tweepy.API(auth)
+	list_of_files = glob.glob('path/*.png')
+	latest_file = max(list_of_files, key=os.path.getctime)
+	print(latest_file)
 
-    image = open(latest_files, 'rb')
-    message = 'placeholder'
-    response = twitter.upload_media(media=image)
-    media_id = [response['media_id']]
-    twitter.update_status(status=message, media_ids=media_id)
+	image = open(latest_files, 'rb')
+	message = 'placeholder'
+	response = twitter.upload_media(media=image)
+	media_id = [response['media_id']]
+	twitter.update_status(status=message, media_ids=media_id)
 
   
         
