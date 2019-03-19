@@ -1,4 +1,3 @@
-
 #wrapper functions for the snowbot tasks
 
 def fetchData():
@@ -220,8 +219,11 @@ def krigingscript():
 
 
 	    return interpolated_values
-
-	all_data_daily_slice = 'data/backup_20190316_03.csv'
+    
+	today = str(date.today())
+	sens = 3
+	fname = "{}_0{}".format(today.replace('-',''),sens)
+	all_data_daily_slice = 'data/backup_{}.csv".format(fname) 
 	data = kriging_per_row(all_data_daily_slice)
 	data.to_csv("interpolated_data.csv")
 
@@ -231,13 +233,15 @@ def production_script():
 	import numpy as np
 	import zipfile
 	import pickle
+	from datetime import datetime, date, timedelta
 	from sklearn.metrics import mean_squared_error
 	import matplotlib.pyplot as plt
+	import xgboost as xgb
+	from scipy.stats import pearsonr
 
-	def read_swe():
+	def read_swe(url_path):
 	    '''function to read in and format the raw swe data (y data)'''
-	    url = 'https://s3-us-west-2.amazonaws.com/cawater-public/swe/pred_SWE.txt'
-	    swe_vol = pd.read_csv(url, header=None, names=['date', 'area', 'vol'])
+	    swe_vol = pd.read_csv(url_path, header=None, names=['date', 'area', 'vol'])
 	    swe_vol['date'] = pd.to_datetime(swe_vol['date'])
 	    swe_vol.set_index('date', inplace=True)
 	    swe_vol.drop(columns=['area'], axis=1, inplace=True)
@@ -249,11 +253,16 @@ def production_script():
 	def read_file(file_path):
 	    '''Function to read in daily x data'''
 	    station = pd.read_csv(file_path)
+	    station.dropna(axis=1,how='all',inplace=True)
+	    station.replace('---', '0', inplace=True)        
 	    station['date'] = pd.to_datetime(station['date'])
 	    station = station.sort_values(by='date')
 	    station.set_index('date', inplace=True)  # put date in the index
-	    station = station[station.index > '1984-09-29']  # removes days where there is no y-data
-	    station.replace('---', '0', inplace=True)
+	    station = station[station.index > '1984-09-29']
+        # removes days where there is no y-data
+	    cols = station.columns
+	    station[cols] = station[cols].apply(pd.to_numeric, errors='coerce')
+	    station = station.apply(lambda row: row.fillna(row.mean()), axis=1)
 	    try:
 	        station.drop(columns=['Unnamed: 0'], axis=1, inplace=True)  # drop non-station columns
 	    except:
@@ -273,17 +282,46 @@ def production_script():
 
 	    return swe, x, y, x_array
 
+	def create_lags(x, n_in=1, n_out=1, dropnan=True):
+
+	    n_vars = 1 if type(x) is list else x.shape[1]
+	    df = pd.DataFrame(x)
+	    cols, names = list(), list()
+    # input sequence (t-n, ... t-1)
+	    for i in range(n_in, 0, -1):
+	        cols.append(df.shift(i))
+	        names += [('var%d(t-%d)' % (j+1, i)) for j in range(n_vars)]
+    # forecast sequence (t, t+1, ... t+n)
+	    for i in range(0, n_out):
+	        cols.append(df.shift(-i))
+	        if i == 0:
+	            names += [('var%d(t)' % (j+1)) for j in range(n_vars)]
+	        else:
+	            names += [('var%d(t+%d)' % (j+1, i)) for j in range(n_vars)]
+    # put it all together
+	    agg = pd.concat(cols, axis=1)
+	    agg.columns = names
+    # drop rows with NaN values
+	    if dropnan:
+	        agg.dropna(inplace=True)
+ 
+	    return agg
 
 	def train_test_split(x, y):
 	    y.reset_index(inplace=True)
 	    y_filter = y.iloc[2:]
 	    xy_lag = pd.merge(left=y_filter, right=x, how='left', left_index=True, right_index=True)
 	    xy_lag.set_index('date', inplace=True)
+        
+	    last_data = datetime.date(2018, 8, 29)
+	    today = datetime.date.today()
+	    predict_range = today - last_data
+	    predict_range = round(age.total_seconds() / 86400)
 
 	    # split into three data frames: train, test, and predict
 	    train = xy_lag.iloc[:round(len(xy_lag) * 0.65)]
-	    test = xy_lag.iloc[round(len(xy_lag) * 0.65):-125]
-	    predict = xy_lag.iloc[-125:]  # predict is last 125 rows where there is no Y-data
+	    test = xy_lag.iloc[round(len(xy_lag) * 0.65):-(predict_range)]
+	    predict = xy_lag.iloc[-(predict_range):]  # predict is last 125 rows where there is no Y-data
 
 	    train.dropna(subset=['vol'], inplace=True)
 	    test.dropna(subset=['vol'], inplace=True)
@@ -405,10 +443,10 @@ def production_script():
 	    ax1.set_ylabel("Predicted")
 	    ax1.set_title("Daily SWE Across the Sierras, 1984-2017, Actual vs. Predicted (Train set)")
 
-	    ax.annotate("Test correlation: {}".format(round(y_test['vol'].corr(test_graph[0]), 2),
-	                                              xy=(1, 28), xytext=(0, 30)))
-	    ax1.annotate("Train correlation: {}".format(round(y_train['vol'].corr(train_graph[0]), 3),
-	                                                xy=(1, 28), xytext=(0, 37.5)))
+	    #ax.annotate("Test correlation: {}".format(round(y_test['vol'].corr(test_graph[0]), 2),
+	                                              #xy=(1, 28), xytext=(0, 30)))
+	    #ax1.annotate("Train correlation: {}".format(round(y_train['vol'].corr(train_graph[0]), 3),
+	                                                #xy=(1, 28), xytext=(0, 37.5)))
 
 	    font = {'family' : 'normal',
 	        'weight' : 'bold',
@@ -416,7 +454,7 @@ def production_script():
 
 	    plt.rc('font', **font)
 
-	    plt.savefig("SWE Correlation Plots {}.png".format(datetime.datetime.now().strftime("%Y-%m-%d")))
+	    plt.savefig("SWE Correlation Plots {}.png".format(datetime.now().strftime("%Y-%m-%d")))
 
 	def vis3(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test):
 
@@ -494,10 +532,8 @@ def production_script():
 	    #get upper and lower standard deviation bounds
 	    swe_agg['std_upper'] = swe_agg['mean'] + swe_agg['std']
 	    swe_agg['std_lower'] =  swe_agg['mean'] - swe_agg['std']
-
 	    #resent index so I can use water day in the charting
 	    swe_agg.reset_index(inplace=True)
-
 
 	    fig = plt.figure(figsize=(20,10))
 	    ax = fig.add_subplot(111)
@@ -527,20 +563,25 @@ def production_script():
 
 	    plt.savefig("Daily Water Year Graph_{}.png".format(datetime.datetime.now().strftime("%Y-%m-%d")))
 
-	file = 'fulldataset.csv'
-	xgb_pickle = "swe_xgb.pickle.dat"
+        
+	today = str(date.today())
+	sens = 3
+	fname = "{}_0{}".format(today.replace('-',''),sens)
+	file = "data/backup_{}.csv".format(fname)     
+	xgb_pickle = "data/swe_xgb.pickle.dat"
+	url_path = 'https://s3-us-west-2.amazonaws.com/cawater-public/swe/pred_SWE.txt'
 
 	swe_vol = read_swe(url_path)
 	station = read_file(file)
 	swe, x, y, x_array = merge_data(swe_vol, station)
 	x_lag = create_lags(x_array, n_in=2, n_out=1)
-	train, test, predict, y_train, x_train, y_test, x_test, y_predict, x_predict = train_test_split(x_lag, y)
+	y_train, x_train, y_test, x_test, y_predict, x_predict, train, test, predict = train_test_split(x_lag, y)
 	train_preds, test_preds, predict_preds, test_rmse, train_rmse = model(xgb_pickle, x_train, x_test,
                                                                           x_predict, y_test, y_train)
 
 	#vis1(train, train_preds, test, test_preds, predict, predict_preds, y_train, y_test, train_rmse, test_rmse)
 	vis2(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test)
-	vis3(y_train, y_test, pred_graph)
+	vis3(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test)
 
 
 def twitter_post(cons_key,cons_secret,access_token,at_secret):
@@ -556,7 +597,3 @@ def twitter_post(cons_key,cons_secret,access_token,at_secret):
 	response = twitter.upload_media(media=image)
 	media_id = [response['media_id']]
 	twitter.update_status(status=message, media_ids=media_id)
-
-
-
-fetchData()
