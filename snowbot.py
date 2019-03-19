@@ -7,14 +7,14 @@ def fetchData():
 	import urllib
 	from datetime import datetime, date, timedelta
 	import boto3
-	import os 
+	import os
 	import io
 	import re
 
 	def getStationDetails():
 	    df = pd.read_csv('data/stationNames.csv', thousands=',')
 	    return(df[['ID', 'Longitude', 'Latitude', 'ElevationFeet']])
-    
+
 	bucket = 'cadc-snowbot'
 	s3_client = boto3.client('s3')
 	s3_resource = boto3.resource('s3')
@@ -30,61 +30,61 @@ def fetchData():
 	        return [i['Key'] for i in tmp['Contents']]
 	    else:
 	        return None
-	    
+
 	def removeFile(filename=None):
 	    if filename != None:
 	        return False
 	    else:
 	        s3_client.delete_object(Bucket='cadc-snowbot', Key=filename)
 	        return True
-	    
-	def updateHistorical(sens=3, start_date=first_date, end_date=yesterday):  
+
+	def updateHistorical(sens=3, start_date=first_date, end_date=yesterday):
 	    st = '3LK'
 	    url = 'http://cdec.water.ca.gov/dynamicapp/req/CSVDataServlet?Stations={}&SensorNums={}&dur_code=D&Start={}&End={}'.format(st,sens,start_date,end_date)
-	    
+
 	    df_raw = pd.read_csv(url)
 	    df_raw['station_id'] = st
 	    df = pd.DataFrame()
-	    
+
 	    for st in stationIDs[1:]:
 	        url = 'http://cdec.water.ca.gov/dynamicapp/req/CSVDataServlet?Stations={}&SensorNums={}&dur_code=D&Start={}&End={}'.format(st,sens,start_date,end_date)
 	        tmp = pd.read_csv(url)
-	        
+
 	        df_raw = df_raw.append(tmp)
-	        
+
 	        tmp['date'] = [datetime.strptime(i[:8], '%Y%m%d').date() \
 	                       for i in tmp['DATE TIME']]
 	        tmp = tmp[['date', 'VALUE']]
 	        tmp.columns = ['date', st]
 	        tmp.set_index('date')
 
-	        df = tmp if df.shape[0]==0 else df.merge(tmp, how='outer')   
-	        
+	        df = tmp if df.shape[0]==0 else df.merge(tmp, how='outer')
+
 	    if((start_date == first_date) & (end_date == yesterday)):
 	        backupData(df, df_raw, sens)
-            
+
 	    #df.to_csv("station_data.csv")
 	    #df_raw.to_csv("station_data_raw.csv")
-	    
+
 	    return df, df_raw
-	    
+
 	def backupData(df, df_raw, sens):
 	    fname = "{}_0{}".format(today.replace('-',''),sens)
 	    fnameBackup = "backup_{}.csv".format(fname)
 	    fnameRaw = "raw_{}.csv".format(fname)
-	    
+
 	    df.to_csv("data/{}".format(fnameBackup))
 	    df_raw.to_csv("data/{}".format(fnameRaw))
-        
+
 	    s3_resource.Object(bucket,fnameBackup).upload_file(Filename='data/{}'.format(fnameBackup))
-	    
+
 	    s3_resource.Object(bucket,fnameRaw).upload_file(Filename='data/{}'.format(fnameRaw))
-	    
+
 	    if os.path.exists("data/{}".format(fnameBackup)):
 	        os.remove("data/{}".format(fnameBackup))
 	    if os.path.exists("data/{}".format(fnameRaw)):
 	        os.remove("data/{}".format(fnameRaw))
-	    
+
 	def getLastFile(sens='03', prefix='backup', download=False):
 	    r = re.compile("%s.*%s.csv"%(prefix, sens))
 	    f = [i for i in listAll() if r.match(i)]
@@ -94,28 +94,25 @@ def fetchData():
 	    else:
 	        obj = s3_client.get_object(Bucket=bucket, Key=file)#.download_file(Filename=f'data/{file}')
 	        return(pd.read_csv(io.BytesIO(obj['Body'].read())))
-	    
+
 	def getUrl(st, sens, start, end):
 	    return('http://cdec.water.ca.gov/dynamicapp/req/CSVDataServlet?Stations={}&SensorNums={}&dur_code=D&Start={}&End={}'.format(st,sens,today,today))
 
 	def getToday(start_date = yesterday):
-	    df, df_raw = updateHistorical(3, yesterday, yesterday)
+	    df, df_raw = updateHistorical(3, start_date, yesterday)
 	    return(df)
 
-	def dailyUpdate(sens=3):
-	    try:
-	        updateHistorical(sens) 
-	    except:
-	        try:
-	            getLastFile('0{}'.format(sens), 'backup')
-	        except:
-	            getLastFile('0{}'.format(sens), 'raw')
-	            filename=max(os.listdir('data/raw*'))
-	            processRaw(filename)
-                
-	data1, data2 = dailyUpdate(sens=3)
-	data1.to_csv("station_level_data.csv")   
-	data2.to_csv("station_level_data_raw.csv")                
+	# try:
+	data1, data2 = updateHistorical(3)
+	# except:
+	# 	data1 = getLastFile('0{}'.format(sens), 'backup')
+    #     data2 = getLastFile('0{}'.format(sens), 'raw')
+        # filename=max(os.listdir('data/raw*'))
+        # processRaw(filename)
+		# return(data1, data2)
+	# data1, data2 = dailyUpdate(sens=3)
+	data1.to_csv("station_level_data.csv")
+	data2.to_csv("station_level_data_raw.csv")
 
 def krigingscript():
 
@@ -129,16 +126,16 @@ def krigingscript():
 	import pandas as pd
 
 	def kriging_per_row(all_data_daily_slice):
-    
+
 	    param_dict3d = {"method":["ordinary3d", "universal3d"],"variogram_model": ["linear", "power", "gaussian", "spherical"]}
-	                    
+
 	    estimator = GridSearchCV(Krige(), param_dict3d, verbose=False)
 	    interpolated_values = pd.DataFrame()
-	  
-	    for index,row_under_observation in all_data_daily_slice.iterrows(): 
-	        row_under_observation = pd.DataFrame(row_under_observation)   
+
+	    for index,row_under_observation in all_data_daily_slice.iterrows():
+	        row_under_observation = pd.DataFrame(row_under_observation)
 	        transposed_row = row_under_observation.T
-	  
+
 	              #merge using station ids as indices
 	        snow_amt_with_locn = all_data_daily_slice.merge(row_under_observation,left_index = True, right_index = True)
 	        snow_amt_with_locn.rename(columns = {index : 'snow_adj_inches'} , inplace = True)
@@ -147,70 +144,70 @@ def krigingscript():
 	  #containing non null values
 	        snow_amt_with_locn_notnull = snow_amt_with_locn.dropna()
 	    #print(snow_amt_with_locn_notnull.shape)
-	  
-	  #containing null values 
+
+	  #containing null values
 	        snow_amount_null = snow_amt_with_locn[snow_amt_with_locn['snow_adj_inches'].isnull() == True]
 	        snow_amount_null.drop(['snow_adj_mters'],axis=1 , inplace = True)
-	  
+
 
 	  # perform grid search to identify the good fitting variogram
 	        if (snow_amt_with_locn_notnull.shape[0] != 0 and snow_amt_with_locn_notnull.shape[0] != 1):
-	            lons=numpy.array(snow_amt_with_locn_notnull['Longitude_Metres']) 
+	            lons=numpy.array(snow_amt_with_locn_notnull['Longitude_Metres'])
 	            lons = lons[~numpy.isnan(lons)]
 
-	            lats=numpy.array(snow_amt_with_locn_notnull['Latiitude_Metres']) 
+	            lats=numpy.array(snow_amt_with_locn_notnull['Latiitude_Metres'])
 	            lats = lats[~numpy.isnan(lats)]
 	            elev=numpy.array(snow_amt_with_locn_notnull['ElevationRelative'])
 	            snow_amount =numpy.array(snow_amt_with_locn_notnull['snow_adj_mters'])
 	      # count the number of zeros in snow_amount
 	      #print(snow_amount)
-	      
+
 	            zero_count = (snow_amount == 0.0).sum()
 	            zero_count_fraction = (zero_count / snow_amount.shape[0])
-     
+
 
 	        if numpy.all(snow_amount == 0.0) or zero_count_fraction >= 0.9:
 	            predicted_Values = numpy.zeros(snow_amount_null.shape[0])
 	            predicted_snow_values = pd.DataFrame(predicted_Values,index =snow_amount_null.index.values.tolist() , columns = ['snow_adj_mters'])
-	        
-	  
+
+
 	        else:
-	            lons_null=numpy.array(snow_amount_null['Longitude_Metres']) 
-	            lats_null=numpy.array(snow_amount_null['Latiitude_Metres']) 
+	            lons_null=numpy.array(snow_amount_null['Longitude_Metres'])
+	            lats_null=numpy.array(snow_amount_null['Latiitude_Metres'])
 	            elev_null=numpy.array(snow_amount_null['ElevationRelative'])
 	            X = numpy.array(snow_amt_with_locn_notnull[['Longitude_Metres','Latiitude_Metres', 'ElevationRelative']])
 	            y = numpy.array(snow_amt_with_locn_notnull['snow_adj_mters'])
 	            estimator = GridSearchCV(Krige(), param_dict3d, verbose=False)
-	        
-	        
+
+
 	        try:
 	            estimator.fit(X=X, y=y, verbose=False)
 	        # find the best kriging technique:
 	            if hasattr(estimator, 'best_score_'):
 	                print('best_score R²={}'.format(round(estimator.best_score_,2)))
 	                print('best_params = ', estimator.best_params_)
-	  
-	        
+
+
 	            if(estimator.best_params_['method'] == 'universal3d' ):
 	                ok3d = UniversalKriging3D(lons, lats, elev, snow_amount, variogram_model=estimator.best_params_['variogram_model'])
 	                predicted_Values, variance_locn = ok3d.execute('points',  lons_null,lats_null,elev_null)
-	          
+
 	            else:
 	                sim3d = OrdinaryKriging3D(lons, lats, elev, snow_amount, variogram_model=estimator.best_params_['variogram_model'])
 	                predicted_Values, variance_locn = sim3d.execute('points',  lons_null,lats_null,elev_null)
-	          
-	          
+
+
 	        except ValueError:
 	            sim3d = OrdinaryKriging3D(lons, lats, elev, snow_amount, variogram_model='gaussian')
 	            predicted_Values, variance_locn = sim3d.execute('points',  lons_null,lats_null,elev_null)
-	          
-	            
+
+
 	            predicted_snow_values = pd.DataFrame(predicted_Values,index =snow_amount_null.index.values.tolist() , columns = ['snow_adj_mters'])
-	        
+
 	            interplated_df = pd.merge(predicted_snow_values,snow_amount_null,left_index = True, right_index = True)
-	        
+
 	            final_row = pd.concat([snow_amt_with_locn_notnull,interplated_df])
-	        
+
 	            final_row_snow = final_row[['snow_adj_mters']]
 	            final_row_snow_transpose = final_row_snow.T
 	            final_row_snow_transpose = final_row_snow_transpose[stn_data.ID.values.tolist()]
@@ -219,14 +216,14 @@ def krigingscript():
 	    else:
 	        last_row = interpolated_values.tail(1)
 	        interpolated_values = interpolated_values.append(last_row)
-	    
-	    
-	    
+
+
+
 	    return interpolated_values
-    
-	all_data_daily_slice = 'data/backup_20190316_03.csv'    
+
+	all_data_daily_slice = 'data/backup_20190316_03.csv'
 	data = kriging_per_row(all_data_daily_slice)
-	data.to_csv("interpolated_data.csv")    
+	data.to_csv("interpolated_data.csv")
 
 
 def production_script():
@@ -357,7 +354,7 @@ def production_script():
 
 	    ax.text('1984-1-1', 37, "RMSE of the train set: {}".format(round(train_rmse, 4)))
 	    ax.text('1984-1-1', 35, "RMSE of the test set: {}".format(round(test_rmse, 4)))
-	
+
 	    font = {'family' : 'normal',
 	        'weight' : 'bold',
 	        'size'   : 14}
@@ -418,7 +415,7 @@ def production_script():
 	        'size'   : 10}
 
 	    plt.rc('font', **font)
-	
+
 	    plt.savefig("SWE Correlation Plots {}.png".format(datetime.datetime.now().strftime("%Y-%m-%d")))
 
 	def vis3(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test):
@@ -488,19 +485,19 @@ def production_script():
 	    pred_series['water_day'] = [x - 273 if x >= 273 else x + 92 for x in pred_series['doy']]
 
 	    pred_series = pred_series[['water_day', 0]]
-	
-	    #get day level standard deviation 
+
+	    #get day level standard deviation
 	    total_swe['water_day'] = [x-273 if x >= 273 else x+92 for x in total_swe['doy']]
 
 	    swe_agg = total_swe.groupby('water_day')['vol'].agg(['mean','std'])
-	
+
 	    #get upper and lower standard deviation bounds
 	    swe_agg['std_upper'] = swe_agg['mean'] + swe_agg['std']
 	    swe_agg['std_lower'] =  swe_agg['mean'] - swe_agg['std']
-	
+
 	    #resent index so I can use water day in the charting
 	    swe_agg.reset_index(inplace=True)
-	
+
 
 	    fig = plt.figure(figsize=(20,10))
 	    ax = fig.add_subplot(111)
@@ -531,7 +528,7 @@ def production_script():
 	    plt.savefig("Daily Water Year Graph_{}.png".format(datetime.datetime.now().strftime("%Y-%m-%d")))
 
 	file = 'fulldataset.csv'
-	xgb_pickle = "swe_xgb.pickle.dat"  
+	xgb_pickle = "swe_xgb.pickle.dat"
 
 	swe_vol = read_swe(url_path)
 	station = read_file(file)
@@ -545,7 +542,7 @@ def production_script():
 	vis2(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test)
 	vis3(y_train, y_test, pred_graph)
 
-    
+
 def twitter_post(cons_key,cons_secret,access_token,at_secret):
 	auth = tweepy.OAuthHandler(cons_key,cons_secret)
 	auth.set_access_token(access_token,at_secret)
@@ -560,12 +557,6 @@ def twitter_post(cons_key,cons_secret,access_token,at_secret):
 	media_id = [response['media_id']]
 	twitter.update_status(status=message, media_ids=media_id)
 
-  
-        
-        
-        
-        
-        
-          
-        
-	            
+
+
+fetchData()
