@@ -328,31 +328,35 @@ def production_script():
 
 	    # split into X and Y for each of train, test, and predict
 	    y_train = train['vol']
-	    x_train = train.iloc[:, 1:]
+	    x_train = train.drop(['vol'],axis=1)
 
 	    y_test = test['vol']
-	    x_test = test.iloc[:, 1:]
+	    x_test = test.drop(['vol'],axis=1)
 
 	    y_predict = predict['vol']
-	    x_predict = predict.iloc[:, 1:]
+	    x_predict = predict.drop(['vol'],axis=1)
 
 	    return y_train, x_train, y_test, x_test, y_predict, x_predict, train, test, predict
 
 
-	def model(xgb_model, x_train, x_test, x_predict, y_test, y_train):
-	    xgb = pickle.load(open(xgb_model, "rb"))
+	def model(x_train, x_test, x_predict, y_test, y_train):
+	    xg_reg = xgb.XGBRegressor(objective ='reg:linear', colsample_bytree=0.3, 
+                                  learning_rate=0.05,max_depth=6, n_estimators=150,seed=13)
+	    xg_reg.set_params(min_child_weight=5)
+	    xg_reg.set_params(gamma=5)
+	    xg_reg.set_params(reg_alpha=0)
+	    xg_reg.set_params(reg_lambda=1.5)
 
-	    train_preds = xgb.predict(x_train)
-	    test_preds = xgb.predict(x_test)
-	    predict_preds = xgb.predict(x_predict)
-
+	    xg_reg.fit(x_train,y_train)
+	    train_preds = xg_reg.predict(x_train)
+	    test_preds = xg_reg.predict(x_test)
+	    predict_preds = xg_reg.predict(x_predict)
 	    test_rmse = np.sqrt(mean_squared_error(y_test, test_preds))
-
-	    train_rmse = np.sqrt(mean_squared_error(y_train, train_preds))
-
+	    train_rmse = np.sqrt(mean_squared_error(y_train, train_preds
+                                               ))
 	    return train_preds, test_preds, predict_preds, test_rmse, train_rmse
 
-	def vis1(train, train_preds, test, test_preds, predict, predict_preds, y_train, y_test, train_rmse, test_rmse):
+	def vis1(today, train, train_preds, test, test_preds, predict, predict_preds, y_train, y_test, train_rmse, test_rmse):
 	    # join back to dates for graphing
 
 	    train_graph = pd.merge(left=pd.DataFrame(train.index), right=pd.DataFrame(train_preds), how='left',
@@ -390,8 +394,10 @@ def production_script():
 	    ax.set_title("Daily SWE Estimates Across the Sierras, 1984-2018, Actual vs. Estimates and Projection")
 	    plt.legend()
 
-	    ax.text('1984-1-1', 37, "RMSE of the train set: {}".format(round(train_rmse, 4)))
-	    ax.text('1984-1-1', 35, "RMSE of the test set: {}".format(round(test_rmse, 4)))
+	    ax.text('1984-1-1', 47, "RMSE of the train set: {}".format(round(train_rmse, 4)))
+	    ax.text('1984-1-1', 45, "RMSE of the test set: {}".format(round(test_rmse, 4)))
+        
+	    ax.set_ylim(0,50)
 
 	    font = {'family' : 'normal',
 	        'weight' : 'bold',
@@ -399,11 +405,9 @@ def production_script():
 
 	    plt.rc('font', **font)
 
-	    plt.savefig('SWE Time Series {}.png'.format(datetime.datetime.now().strftime("%Y-%m-%d")))
+	    plt.savefig('SWE Time Series {}.png'.format(today))
 
-	    return train_graph, test_graph, pred_graph
-
-	def vis2(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test):
+	def vis2(today, train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test):
 
 	    # join back to dates for graphing
 
@@ -443,20 +447,24 @@ def production_script():
 	    ax1.set_ylabel("Predicted")
 	    ax1.set_title("Daily SWE Across the Sierras, 1984-2017, Actual vs. Predicted (Train set)")
 
-	    #ax.annotate("Test correlation: {}".format(round(y_test['vol'].corr(test_graph[0]), 2),
-	                                              #xy=(1, 28), xytext=(0, 30)))
-	    #ax1.annotate("Train correlation: {}".format(round(y_train['vol'].corr(train_graph[0]), 3),
-	                                                #xy=(1, 28), xytext=(0, 37.5)))
+	    ax.text(1,37,"Test correlation: {}".format(round(y_test['vol'].corr(test_graph[0]), 2)))
+	    ax1.text(1,37,"Train correlation: {}".format(round(y_train['vol'].corr(train_graph[0]), 3)))
 
+	    ax.set_ylim(0,40)
+	    ax.set_xlim(0,40)
+        
+	    ax1.set_ylim(0,40)
+	    ax1.set_xlim(0,40)
+        
 	    font = {'family' : 'normal',
 	        'weight' : 'bold',
 	        'size'   : 10}
 
 	    plt.rc('font', **font)
 
-	    plt.savefig("SWE Correlation Plots {}.png".format(datetime.now().strftime("%Y-%m-%d")))
-
-	def vis3(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test):
+	    plt.savefig("SWE Correlation Plots {}.png".format(today))
+        
+	def vis3(today, train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test):
 
 	    train_graph = pd.merge(left=pd.DataFrame(train.index), right=pd.DataFrame(train_preds), how='left',
 	                           left_index=True, right_index=True)
@@ -514,7 +522,7 @@ def production_script():
 
 	    pred_graph.reset_index(inplace=True)
 
-	    pred_series = pred_graph.iloc[-91:]  # just takes dates for the beginning of the water year
+	    pred_series = pred_graph.iloc[33:]  # just takes dates for the beginning of the water year
 
 	    # extract year and day of year from full date
 	    pred_series['year'] = pred_series['date'].dt.year
@@ -532,6 +540,7 @@ def production_script():
 	    #get upper and lower standard deviation bounds
 	    swe_agg['std_upper'] = swe_agg['mean'] + swe_agg['std']
 	    swe_agg['std_lower'] =  swe_agg['mean'] - swe_agg['std']
+
 	    #resent index so I can use water day in the charting
 	    swe_agg.reset_index(inplace=True)
 
@@ -545,7 +554,7 @@ def production_script():
 	    ax.set_xlabel("Day of the Water Year")
 	    ax.set_ylabel("Sierra Nevada Total Storage [km3]")
 	    ax.set_title("SWE Daily Estimate Comparison")
-	    ax.set_ylim(0.15,30)
+	    ax.set_ylim(0.15,50)
 	    ax.set_xlim(0,365)
 
 	    plt.fill_between(swe_agg['water_day'],swe_agg['std_lower'], swe_agg['std_upper'], facecolor='lightgray',label='1984-2016 +/- 1 std.')
@@ -553,22 +562,21 @@ def production_script():
 
 	    plt.legend()
 
-	    ax.annotate("Updated as of: {}".format(datetime.datetime.now().strftime("%Y-%m-%d")),xy=(1, 28), xytext=(1.5, 28))
-	    ax.annotate("Today's Forecast: {} [km3]".format(pred_series[0].iloc[-1:].values),xy=(1, 28), xytext=(1.5, 26))
+	    ax.text(1,48,"Updated as of: {}".format(today))
+	    ax.text(1,46,"Today's Forecast: {} [km3]".format(pred_series[0].iloc[-1:].values))
 
 	    font = {'family':'normal','weight':'bold','size': 16}
 
 	    plt.text(0.05,-5,"Comment: Today's forecast is {}% of the historical average".format((pred_series[0].iloc[-1:].values / actuals_series['vol_y'][len(pred_series) -1]) * 100))
 	    plt.rc('font', **font)
 
-	    plt.savefig("Daily Water Year Graph_{}.png".format(datetime.datetime.now().strftime("%Y-%m-%d")))
+	    plt.savefig("Daily Water Year Graph_{}.png".format(today))
 
         
 	today = str(date.today())
 	sens = 3
 	fname = "{}_0{}".format(today.replace('-',''),sens)
 	file = "data/backup_{}.csv".format(fname)     
-	xgb_pickle = "data/swe_xgb.pickle.dat"
 	url_path = 'https://s3-us-west-2.amazonaws.com/cawater-public/swe/pred_SWE.txt'
 
 	swe_vol = read_swe(url_path)
@@ -576,12 +584,12 @@ def production_script():
 	swe, x, y, x_array = merge_data(swe_vol, station)
 	x_lag = create_lags(x_array, n_in=2, n_out=1)
 	y_train, x_train, y_test, x_test, y_predict, x_predict, train, test, predict = train_test_split(x_lag, y)
-	train_preds, test_preds, predict_preds, test_rmse, train_rmse = model(xgb_pickle, x_train, x_test,
+	train_preds, test_preds, predict_preds, test_rmse, train_rmse = model(x_train, x_test,
                                                                           x_predict, y_test, y_train)
 
-	#vis1(train, train_preds, test, test_preds, predict, predict_preds, y_train, y_test, train_rmse, test_rmse)
-	vis2(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test)
-	vis3(train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test)
+	vis1(today, train, train_preds, test, test_preds, predict, predict_preds, y_train, y_test, train_rmse, test_rmse)
+	vis2(today, train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test)
+	vis3(today, train, test, predict, train_preds, test_preds, predict_preds, y_train, y_test)
 
 
 def twitter_post(cons_key,cons_secret,access_token,at_secret):
